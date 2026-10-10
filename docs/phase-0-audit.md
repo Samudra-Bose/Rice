@@ -31,13 +31,13 @@
     *   `NVreg_UseKernelSuspendNotifiers=1`
 *   **Systemd Services:** `nvidia-suspend.service`, `nvidia-resume.service`, and `nvidia-hibernate.service` are currently **disabled** and inactive.
 *   **Session Freeze Drop-in:** `/usr/lib/systemd/system/systemd-suspend.service.d/10-nvidia-no-freeze-session.conf` is owned by `nvidia-utils 615.71.09-1` and intentionally sets `SYSTEMD_SLEEP_FREEZE_USER_SESSIONS=false`.
-*   **Classification:** Probable Cause (Environment/Driver configuration). Saving/restoring VRAM via `NVreg_PreserveVideoMemoryAllocations=1` often requires the systemd services to be enabled to correctly dump memory to `/var/tmp` before suspend, though behavior varies by exact driver version with `UseKernelSuspendNotifiers`. 
+*   **Classification:** Unresolved problem. For NVIDIA driver 615.71.09 (which is >595) using open kernel modules, memory preservation is handled automatically by kernel suspend notifiers (`NVreg_UseKernelSuspendNotifiers=1`). According to the Arch Wiki and NVIDIA upstream documentation, the systemd services (`nvidia-suspend`, `nvidia-resume`) are explicitly unnecessary and correctly disabled by default. The disabled services are **not** the cause of the black screen. The actual root cause of the `s2idle` black screen remains unknown and requires further driver-level or firmware-level investigation.
 
 ### 2.3 Quickshell Log Warnings
 *   **Missing icon warnings:** Qt cannot find requested icon assets in the current icon theme. *Classification: Cosmetic issue.*
 *   **Missing `/home/samudra/.face`:** Expected avatar image is absent. *Classification: Cosmetic issue.*
-*   **QML incubation messages:** Asynchronous loading of QML components is delayed or stalling. *Classification: Minor performance warning, potentially upstream Caelestia issue.*
-*   **PipeWire `ENOENT`:** Likely attempting to read a PipeWire node or socket that doesn't exist. *Classification: Potential functional defect (could affect volume widgets).*
+*   **QML incubation messages:** Asynchronous loading of QML components is delayed or stalling. *Classification: Unresolved hypothesis. We do not yet know if this merely causes a visual delay or indicates a deeper component initialization failure.*
+*   **PipeWire `ENOENT`:** An audio node or socket was not found. *Classification: Unresolved hypothesis. The actual impact on the system's audio or volume widgets is currently unverified and must be tested before classifying it as a defect.*
 *   **Qt Wayland text-input messages:** Standard Wayland input method protocol negotiation messages. *Classification: Benign warning.*
 
 ### 2.4 Environment and Platform Variables
@@ -47,5 +47,5 @@
 ## 3. Risks & Recommendations
 
 1.  **Do not attempt to fix historical crashes** unless they reproduce on the current software stack (post-Oct 9).
-2.  **Suspend/Resume:** The mismatch between `NVreg_PreserveVideoMemoryAllocations=1` and disabled NVIDIA systemd services is the primary suspect for the black screen. We should verify NVIDIA's exact suspend procedures for the `615.71.09` driver branch before enabling them.
-3.  **UI Warnings:** These are largely harmless but add log noise. We can ignore them until we begin migrating or rewriting components for Rice.
+2.  **Suspend/Resume:** Our initial hypothesis regarding disabled systemd services was incorrect. For this driver version, the kernel suspend notifiers handle VRAM preservation natively. We must **not** enable the systemd services. The next step is to investigate alternative causes for the black screen, such as GSP firmware issues, kernel ACPI warnings, or `s2idle` incompatibility with this specific laptop hardware.
+3.  **UI Warnings:** We cannot assume the QML incubation and PipeWire warnings are harmless. Their actual functional impact must be verified through targeted testing before they are dismissed.
