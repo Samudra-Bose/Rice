@@ -61,7 +61,7 @@ check_coredumps() {
     local rc=0
     out=$(coredumpctl list "$@" --no-pager 2>&1) || rc=$?
     
-    if [[ $rc -eq 1 ]] && [[ "$out" == *"No match found"* ]]; then
+    if [[ $rc -ne 0 ]] && [[ "$out" == *"No coredumps found"* || "$out" == *"No match found"* ]]; then
         echo "INFO: No core dumps found."
     else
         if [[ -n "$out" ]]; then
