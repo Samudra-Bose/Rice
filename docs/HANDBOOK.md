@@ -200,11 +200,9 @@ Use the actual package logs when assessing version compatibility, and distinguis
 
 Rice must be isolated from the existing working desktop until a controlled deployment is explicitly approved.
 
-The intended project root is:
+The verified project root is:
 
 `~/Projects/VisualSCode/Rice`
-
-This path must be verified. Earlier inspection had confirmed `~/Projects`, but had not established that `~/Projects/VisualSCode/Rice` already existed.
 
 Do not silently assume a repository exists, initialize Git, create remotes, or restructure an existing workspace without first inspecting the current state.
 
