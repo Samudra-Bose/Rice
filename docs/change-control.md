@@ -18,7 +18,9 @@ To ensure system stability, every significant change to the Rice workspace or th
 
 ## 4. Isolate
 *   **Never modify live system or package-owned files directly.**
-*   All work happens inside `~/Projects/Rice`.
+*   All work happens inside `~/Projects/VisualSCode/Rice`.
+*   Diagnostic reads outside of the project workspace are permitted and encouraged to investigate issues.
+*   Unauthorized writes outside of the workspace are strictly prohibited.
 *   If upstream Caelestia files need modifying, patch them in a controlled, versioned manner.
 
 ## 5. Implement
@@ -32,6 +34,7 @@ To ensure system stability, every significant change to the Rice workspace or th
 *   Run appropriate syntax checks, Qt/QML linters, or Quickshell test runs.
 *   Perform functional tests (clicks, keyboard navigation).
 *   Test lifecycle events if applicable (reloads, multi-monitor, sleep/wake).
+*   **Explicit owner approval is required** before performing risky live-system changes, deployments, shell restarts, reboot experiments, or suspend/resume tests.
 *   **Do not report a test as passed if it was not run.** 
 
 ## 8. Recover

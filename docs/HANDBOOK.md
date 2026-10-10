@@ -202,9 +202,9 @@ Rice must be isolated from the existing working desktop until a controlled deplo
 
 The intended project root is:
 
-`~/Projects/Rice`
+`~/Projects/VisualSCode/Rice`
 
-This path must be verified. Earlier inspection had confirmed `~/Projects`, but had not established that `~/Projects/Rice` already existed.
+This path must be verified. Earlier inspection had confirmed `~/Projects`, but had not established that `~/Projects/VisualSCode/Rice` already existed.
 
 Do not silently assume a repository exists, initialize Git, create remotes, or restructure an existing workspace without first inspecting the current state.
 
@@ -274,4 +274,5 @@ Follow this cycle for every meaningful change:
 
 Never report a test as passed if it was not actually run. If a test requires a reboot, suspend/resume, or live deployment, mark it pending until performed.
 
-Prefer small feature branches and keep `main` stable. Never force-push or discard
+Prefer small feature branches and keep `main` stable. Never force-push or discard commits on main, and never discard uncommitted work without explicit confirmation. Always preserve history and require owner approval for risky operations.
+
