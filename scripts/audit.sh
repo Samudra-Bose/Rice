@@ -1,9 +1,11 @@
 #!/bin/bash
 set -u
-
 # Resolve absolute path to project root
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRATCH_DIR="${PROJECT_ROOT}/scratch"
+
+# Source external helper libraries
+source "${PROJECT_ROOT}/scripts/lib/coredump-logic.sh"
 # Ensure scratch directory exists
 if ! mkdir -p "${SCRATCH_DIR}"; then
     echo "ERROR: Failed to create scratch directory ${SCRATCH_DIR}" >&2
@@ -60,17 +62,7 @@ check_coredumps() {
     local out
     local rc=0
     out=$(coredumpctl list "$@" --no-pager 2>&1) || rc=$?
-    
-    if [[ $rc -ne 0 ]] && [[ "$out" == *"No coredumps found"* || "$out" == *"No match found"* ]]; then
-        echo "INFO: No core dumps found."
-    else
-        if [[ -n "$out" ]]; then
-            echo "$out"
-        fi
-        if [[ $rc -ne 0 ]]; then
-            echo "WARN: coredumpctl failed with exit code $rc."
-        fi
-    fi
+    _evaluate_coredump_result "$rc" "$out"
     echo ""
 }
 
