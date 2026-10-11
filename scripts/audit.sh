@@ -5,7 +5,15 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRATCH_DIR="${PROJECT_ROOT}/scratch"
 
 # Source external helper libraries
-source "${PROJECT_ROOT}/scripts/lib/coredump-logic.sh"
+COREDUMP_LIB="${PROJECT_ROOT}/scripts/lib/coredump-logic.sh"
+if [[ ! -r "${COREDUMP_LIB}" ]]; then
+    echo "ERROR: Required helper library is missing or unreadable: ${COREDUMP_LIB}" >&2
+    exit 1
+fi
+if ! source "${COREDUMP_LIB}"; then
+    echo "ERROR: Failed to source helper library: ${COREDUMP_LIB}" >&2
+    exit 1
+fi
 # Ensure scratch directory exists
 if ! mkdir -p "${SCRATCH_DIR}"; then
     echo "ERROR: Failed to create scratch directory ${SCRATCH_DIR}" >&2

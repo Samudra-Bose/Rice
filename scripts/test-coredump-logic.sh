@@ -18,8 +18,8 @@ run_test() {
         return 0
     else
         echo "FAIL: ${name}"
-        echo "  Expected: ${expected}"
-        echo "  Actual  : ${actual}"
+        echo "  Expected: '${expected}'"
+        echo "  Actual  : '${actual}'"
         return 1
     fi
 }
@@ -41,6 +41,13 @@ run_test "Successful query (rc=0)" 0 "TIME PID UID GID SIG COREFILE EXE" "TIME P
 
 # 5. An empty-result message with exit code 0.
 run_test "Empty-result message (rc=0)" 0 "No match found." "INFO: No core dumps found." || failures=$((failures + 1))
+
+# 6. Genuine test with rc=0 and out=""
+run_test "Empty output (rc=0)" 0 "" "" || failures=$((failures + 1))
+
+# 7. Regression test for unexpected nonzero return code with no match message
+expected_rc2=$'No match found.\nWARN: coredumpctl failed with exit code 2.'
+run_test "Unexpected rc=2 with No match found." 2 "No match found." "$expected_rc2" || failures=$((failures + 1))
 
 if [[ $failures -ne 0 ]]; then
     echo "Tests failed: $failures"
