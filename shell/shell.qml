@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import "core"
 
 ShellRoot {
     PanelWindow {
@@ -14,14 +15,14 @@ ShellRoot {
             bottom: false
         }
 
-        implicitHeight: 40
-        color: "#2E3440"
+        implicitHeight: Theme.panelHeight
+        color: Theme.backgroundColor
 
         Text {
             anchors.centerIn: parent
             text: "Rice is alive"
-            color: "#ECEFF4"
-            font.pixelSize: 16
+            color: Theme.textColor
+            font.pixelSize: Theme.bodyFontSize
         }
     }
 }
