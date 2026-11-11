@@ -17,15 +17,19 @@ ShellRoot {
             return topBar.manualOverride;
         }
 
+        function triggerCorner(side: string) {
+            topBar.triggerCornerFromIpc(side);
+        }
+
         function status(): string {
             return JSON.stringify({
+                desktopHasWindows: topBar.desktopHasWindows,
+                isRevealed: topBar.isRevealed,
+                cornerTriggered: topBar.cornerTriggered,
                 manualOverride: topBar.manualOverride,
-                leftVisible: topBar.leftVisible,
-                centerVisible: topBar.centerVisible,
-                rightVisible: topBar.rightVisible,
-                leftCollided: topBar.leftCollided,
-                centerCollided: topBar.centerCollided,
-                rightCollided: topBar.rightCollided
+                activeWorkspace: topBar.activeWorkspace,
+                anyCornerHovered: topBar.anyCornerHovered,
+                railHovered: topBar.railHovered
             });
         }
     }
@@ -44,19 +48,19 @@ ShellRoot {
         panelNamespace: "rice-prototype"
 
         mask: Region {
+            // Corner activation zones: always active in input mask to detect pointer enter
             Region {
-                item: topBar.leftVisible ? topBar.leftIsland : null
-                radius: Theme.radiusPill
+                item: topBar.leftCornerItem
             }
 
             Region {
-                item: topBar.centerVisible ? topBar.centerIsland : null
-                radius: Theme.radiusPill
+                item: topBar.rightCornerItem
             }
 
+            // Cohesive control rail: ONLY in input mask when revealed!
             Region {
-                item: topBar.rightVisible ? topBar.rightIsland : null
-                radius: Theme.radiusPill
+                item: topBar.isRevealed ? topBar.navRailItem : null
+                radius: Theme.railRadius
             }
         }
 

@@ -2,38 +2,47 @@ import QtQuick
 import Quickshell.Hyprland
 import Quickshell.Io
 import "../core"
-import "common"
 
 Item {
     id: root
 
     implicitHeight: Theme.panelHeight + Theme.spacingMedium
 
-    // Read-only visual island references for surgical Wayland input masking
-    readonly property Item leftIsland: navCard
-    readonly property Item centerIsland: clockCard
-    readonly property Item rightIsland: statusCard
+    // =========================================================================
+    // Read-only visual item references for surgical Wayland input masking
+    // =========================================================================
+    readonly property Item leftCornerItem: leftCornerSensor
+    readonly property Item rightCornerItem: rightCornerSensor
+    readonly property Item navRailItem: navRail
 
-    // Adaptive collision & manual override states
+    // =========================================================================
+    // State & Visibility Policy Engine
+    // =========================================================================
     property bool manualOverride: false
-    property bool leftCollided: false
-    property bool centerCollided: false
-    property bool rightCollided: false
+    property bool desktopHasWindows: false
+    property bool cornerTriggered: false
+    property int autoHideDelayMs: Theme.autoHideDelayMs
 
-    readonly property bool leftVisible: manualOverride || !leftCollided
-    readonly property bool centerVisible: manualOverride || !centerCollided
-    readonly property bool rightVisible: manualOverride || !rightCollided
+    // Navbar is revealed if:
+    // - State A: Desktop is empty (!desktopHasWindows)
+    // - State C/D: User triggered reveal via corner (cornerTriggered)
+    // - Manual override active via shortcut/IPC (manualOverride)
+    readonly property bool isRevealed: (!desktopHasWindows) || manualOverride || cornerTriggered
 
-    // Active workspace state (interactive)
+    // Pointer hover tracking
+    readonly property bool anyCornerHovered: leftCornerHover.hovered || rightCornerHover.hovered
+    readonly property bool railHovered: railHover.hovered
+
+    // Active workspace state
     property int activeWorkspace: 1
 
-    // Real-time clock and date properties
+    // Real-time clock and date
     property string currentDateText: "WED, OCT 14"
     property string currentTimeText: "12:00"
     property string currentAmPmText: "PM"
 
     // =========================================================================
-    // Collision-Aware Adaptive Navigation Engine
+    // Hyprland Event Coordination & Desktop Window Tracking
     // =========================================================================
     Connections {
         target: Hyprland
@@ -52,6 +61,9 @@ Item {
         }
 
         function onFocusedWorkspaceChanged() {
+            // When workspace changes, reset corner trigger so windowed workspaces default to hidden
+            root.cornerTriggered = false;
+            hideTimer.stop();
             debounceTimer.restart();
         }
     }
@@ -71,7 +83,7 @@ Item {
         interval: 35
         repeat: false
         onTriggered: {
-            root.updateCollisions();
+            root.updateDesktopState();
         }
     }
 
@@ -80,69 +92,28 @@ Item {
         debounceTimer.restart();
     }
 
-    onWidthChanged: updateCollisions()
-    onManualOverrideChanged: updateCollisions()
+    onManualOverrideChanged: updateDesktopState()
 
-    function updateCollisions() {
+    function updateDesktopState() {
         const mon = Hyprland.focusedMonitor;
         const activeWs = Hyprland.focusedWorkspace;
         if (!mon || !activeWs) {
-            root.leftCollided = false;
-            root.centerCollided = false;
-            root.rightCollided = false;
+            root.desktopHasWindows = false;
+            return;
+        }
+
+        root.activeWorkspace = activeWs.id;
+
+        // If fullscreen window exists on active workspace, desktop definitely has windows
+        if (activeWs.hasFullscreen) {
+            root.desktopHasWindows = true;
             return;
         }
 
         const activeWsId = activeWs.id;
-
-        // Rule 1: Fullscreen application on active workspace hides all islands
-        if (activeWs.hasFullscreen) {
-            root.leftCollided = true;
-            root.centerCollided = true;
-            root.rightCollided = true;
-            return;
-        }
-
-        const monIpc = mon.lastIpcObject;
-        const resLeft = (monIpc && monIpc.reserved && monIpc.reserved.length > 0) ? monIpc.reserved[0] : 60;
-        const resTop = (monIpc && monIpc.reserved && monIpc.reserved.length > 1) ? monIpc.reserved[1] : 10;
-        const panelScreenX = mon.x + resLeft;
-        const panelScreenY = mon.y + resTop;
-
-        const restY = panelScreenY + Math.round((root.height - 36) / 2);
-        const cardH = 36;
-
-        const rLeft = {
-            x: panelScreenX + leftRegion.x + navCard.x,
-            y: restY,
-            w: navCard.width,
-            h: cardH
-        };
-        const rCenter = {
-            x: panelScreenX + centerRegion.x + clockCard.x,
-            y: restY,
-            w: clockCard.width,
-            h: cardH
-        };
-        const rRight = {
-            x: panelScreenX + rightRegion.x + statusCard.x,
-            y: restY,
-            w: statusCard.width,
-            h: cardH
-        };
-
-        function rectsIntersect(r1, r2) {
-            return r1.x < r2.x + r2.w &&
-                   r1.x + r1.w > r2.x &&
-                   r1.y < r2.y + r2.h &&
-                   r1.y + r1.h > r2.y;
-        }
-
-        let collL = false;
-        let collC = false;
-        let collR = false;
-
         const toplevels = Hyprland.toplevels.values;
+        let foundApp = false;
+
         for (let i = 0; i < toplevels.length; ++i) {
             const tl = toplevels[i];
             const ipc = tl.lastIpcObject;
@@ -153,35 +124,79 @@ Item {
             if (!ws || ws.id !== activeWsId)
                 continue;
 
-            if (ipc.fullscreen > 0) {
-                collL = collC = collR = true;
-                break;
-            }
-
-            const at = ipc.at;
-            const size = ipc.size;
-            if (!at || !size || at.length < 2 || size.length < 2)
+            // Check monitor scope
+            if (ipc.monitor !== undefined && ipc.monitor !== mon.id)
                 continue;
 
-            const winRect = {
-                x: at[0],
-                y: at[1],
-                w: size[0],
-                h: size[1]
-            };
+            // Exclude zero-size or ghost surfaces
+            const sz = ipc.size;
+            if (!sz || sz.length < 2 || sz[0] < 20 || sz[1] < 20)
+                continue;
 
-            if (!collL && rectsIntersect(rLeft, winRect)) collL = true;
-            if (!collC && rectsIntersect(rCenter, winRect)) collC = true;
-            if (!collR && rectsIntersect(rRight, winRect)) collR = true;
-
-            if (collL && collC && collR) break;
+            foundApp = true;
+            break;
         }
 
-        root.leftCollided = collL;
-        root.centerCollided = collC;
-        root.rightCollided = collR;
+        root.desktopHasWindows = foundApp;
     }
 
+    // =========================================================================
+    // Pointer Retention & Delayed Hiding (State D)
+    // =========================================================================
+    Timer {
+        id: hideTimer
+        interval: root.autoHideDelayMs
+        repeat: false
+        onTriggered: {
+            root.cornerTriggered = false;
+        }
+    }
+
+    onAnyCornerHoveredChanged: {
+        if (root.anyCornerHovered) {
+            if (root.desktopHasWindows) {
+                root.cornerTriggered = true;
+            }
+            hideTimer.stop();
+        } else {
+            if (root.desktopHasWindows && root.cornerTriggered && !root.railHovered) {
+                hideTimer.restart();
+            }
+        }
+    }
+
+    onRailHoveredChanged: {
+        if (root.railHovered) {
+            // Keep visible while pointer is over revealed rail
+            if (root.cornerTriggered) {
+                hideTimer.stop();
+            }
+        } else {
+            // Pointer left rail: start hide delay countdown if outside corner
+            if (root.desktopHasWindows && root.cornerTriggered && !root.anyCornerHovered) {
+                hideTimer.restart();
+            }
+        }
+    }
+
+    function triggerCornerFromIpc(side) {
+        if (root.desktopHasWindows) {
+            root.cornerTriggered = true;
+            hideTimer.restart();
+        }
+    }
+
+    function switchWorkspace(wsId) {
+        if (Hyprland.usingLua) {
+            Hyprland.dispatch('hl.dsp.focus({ workspace = "' + wsId + '" })');
+        } else {
+            Hyprland.dispatch('workspace ' + wsId);
+        }
+    }
+
+    // =========================================================================
+    // Real-Time Clock Engine
+    // =========================================================================
     Timer {
         id: clockTimer
         interval: 1000
@@ -195,283 +210,300 @@ Item {
 
             root.currentDateText = days[now.getDay()] + ", " + months[now.getMonth()] + " " + now.getDate();
 
-            let hours = now.getHours();
-            root.currentAmPmText = hours >= 12 ? "PM" : "AM";
-            hours = hours % 12;
-            hours = hours ? hours : 12;
-            const minutes = ("0" + now.getMinutes()).slice(-2);
-            root.currentTimeText = hours + ":" + minutes;
+            let h = now.getHours();
+            const m = String(now.getMinutes()).padStart(2, "0");
+            root.currentAmPmText = h >= 12 ? "PM" : "AM";
+            h = h % 12;
+            if (h === 0)
+                h = 12;
+            root.currentTimeText = String(h) + ":" + m;
         }
     }
 
     // =========================================================================
-    // CENTER REGION: Mathematically Centered Floating Glass Clock Capsule
+    // Corner Activation Sensors (State C)
+    // Small, invisible activation zones positioned at Rice panel corners
     // =========================================================================
     Item {
-        id: centerRegion
-        anchors.centerIn: parent
-        width: clockCard.width
-        height: parent.height
-
-        SurfaceCard {
-            id: clockCard
-            anchors.centerIn: parent
-            height: 36
-            width: clockRow.implicitWidth + Theme.spacingLarge * 2
-            radius: Theme.radiusPill
-            hoverEnabled: true
-            contentPadding: 0
-
-            opacity: root.centerVisible ? 1.0 : 0.0
-            transform: Translate {
-                y: root.centerVisible ? 0 : -44
-                Behavior on y {
-                    NumberAnimation {
-                        duration: Theme.animDuration
-                        easing.type: Easing.OutCubic
-                    }
-                }
-            }
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: Theme.animDuration
-                    easing.type: Easing.OutCubic
-                }
-            }
-
-            Row {
-                id: clockRow
-                anchors.centerIn: parent
-                spacing: Theme.spacingMedium + 2
-
-                // Refined date label
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.currentDateText
-                    font.family: Theme.fontMono
-                    font.pixelSize: 11
-                    font.bold: true
-                    font.letterSpacing: 1.0
-                    color: Theme.textMuted
-                }
-
-                // Accent separator dot
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 4
-                    height: 4
-                    radius: 2
-                    color: Theme.accent
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                }
-
-                // Prominent time display
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 4
-
-                    Text {
-                        id: clockLabel
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: root.currentTimeText
-                        font.family: Theme.fontMono
-                        font.pixelSize: 14
-                        font.bold: true
-                        color: Theme.textPrimary
-                    }
-
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.verticalCenterOffset: 1
-                        text: root.currentAmPmText
-                        font.family: Theme.fontMono
-                        font.pixelSize: 10
-                        font.bold: true
-                        color: Theme.textSecondary
-                    }
-                }
-            }
-        }
-    }
-
-    // =========================================================================
-    // LEFT REGION: Floating Brand Identity & Workspace Selector Island
-    // =========================================================================
-    Item {
-        id: leftRegion
+        id: leftCornerSensor
         anchors.left: parent.left
-        anchors.leftMargin: Theme.spacingLarge
-        anchors.right: centerRegion.left
-        anchors.rightMargin: Theme.spacingMedium
         anchors.top: parent.top
-        anchors.bottom: parent.bottom
+        width: 28
+        height: 20
 
-        SurfaceCard {
-            id: navCard
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            height: 36
-            width: navRow.implicitWidth + Theme.spacingMedium * 2
-            radius: Theme.radiusPill
-            hoverEnabled: false
-            contentPadding: 0
+        HoverHandler {
+            id: leftCornerHover
+        }
+    }
 
-            opacity: root.leftVisible ? 1.0 : 0.0
-            transform: Translate {
-                y: root.leftVisible ? 0 : -44
-                Behavior on y {
+    Item {
+        id: rightCornerSensor
+        anchors.right: parent.right
+        anchors.top: parent.top
+        width: 28
+        height: 20
+
+        HoverHandler {
+            id: rightCornerHover
+        }
+    }
+
+    // =========================================================================
+    // Cohesive Precision Control Rail Component (Choreographed Motion)
+    // =========================================================================
+    Item {
+        id: railContainer
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        width: navRail.width
+        height: Theme.railHeight
+
+        // Coordinated animation target properties
+        property real yOffset: 0.0
+        property real railOpacity: 1.0
+        property real railScale: 1.0
+
+        transform: [
+            Translate {
+                y: railContainer.yOffset
+            },
+            Scale {
+                origin.x: navRail.width / 2
+                origin.y: Theme.railHeight / 2
+                xScale: railContainer.railScale
+                yScale: railContainer.railScale
+            }
+        ]
+
+        opacity: railContainer.railOpacity
+
+        state: root.isRevealed ? "revealed" : "hidden"
+
+        states: [
+            State {
+                name: "revealed"
+                PropertyChanges {
+                    target: railContainer
+                    yOffset: 0.0
+                    railOpacity: 1.0
+                    railScale: 1.0
+                }
+            },
+            State {
+                name: "hidden"
+                PropertyChanges {
+                    target: railContainer
+                    yOffset: Theme.hiddenYOffset
+                    railOpacity: 0.0
+                    railScale: Theme.hiddenScale
+                }
+            }
+        ]
+
+        transitions: [
+            Transition {
+                to: "revealed"
+                ParallelAnimation {
                     NumberAnimation {
-                        duration: Theme.animDuration
+                        target: railContainer
+                        properties: "yOffset,railScale"
+                        duration: Theme.revealDuration
                         easing.type: Easing.OutCubic
+                    }
+                    NumberAnimation {
+                        target: railContainer
+                        property: "railOpacity"
+                        duration: Math.round(Theme.revealDuration * 0.88)
+                        easing.type: Easing.OutQuad
+                    }
+                }
+            },
+            Transition {
+                to: "hidden"
+                ParallelAnimation {
+                    NumberAnimation {
+                        target: railContainer
+                        properties: "yOffset,railScale"
+                        duration: Theme.retractDuration
+                        easing.type: Easing.InCubic
+                    }
+                    NumberAnimation {
+                        target: railContainer
+                        property: "railOpacity"
+                        duration: Math.round(Theme.retractDuration * 0.88)
+                        easing.type: Easing.InQuad
                     }
                 }
             }
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: Theme.animDuration
-                    easing.type: Easing.OutCubic
+        ]
+
+        Rectangle {
+            id: navRail
+            height: Theme.railHeight
+            width: railRow.implicitWidth + Theme.spacingMedium * 2 + Theme.spacingLarge * 2
+            radius: Theme.railRadius
+            color: Theme.railBg
+            border.color: Theme.railBorder
+            border.width: 1
+
+            HoverHandler {
+                id: railHover
+            }
+
+            // Subtle dark ambient drop shadow for physical elevation
+            Rectangle {
+                id: outerShadow
+                anchors.fill: parent
+                anchors.topMargin: 2
+                anchors.bottomMargin: -2
+                radius: parent.radius
+                color: Qt.rgba(0.0, 0.0, 0.0, 0.35)
+                z: -1
+            }
+
+            // Subtle optical depth gradient across the surface
+            Rectangle {
+                id: opticalSheen
+                anchors.fill: parent
+                radius: parent.radius
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Qt.rgba(1.0, 1.0, 1.0, 0.05) }
+                    GradientStop { position: 0.45; color: Qt.rgba(1.0, 1.0, 1.0, 0.01) }
+                    GradientStop { position: 1.0; color: Qt.rgba(0.0, 0.0, 0.0, 0.12) }
                 }
             }
 
+            // Inner specular bevel for physical precision glass depth
+            Rectangle {
+                id: innerBevel
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: Math.max(0, parent.radius - 1)
+                color: "transparent"
+                border.width: 1
+                border.color: Theme.railHighlight
+            }
+
+            // Top-edge light refraction sheen along the upper crown
+            Rectangle {
+                id: topSheen
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: parent.radius
+                anchors.rightMargin: parent.radius
+                height: 1
+                color: Qt.rgba(1.0, 1.0, 1.0, 0.18)
+            }
+
             Row {
-                id: navRow
+                id: railRow
                 anchors.centerIn: parent
                 spacing: Theme.spacingMedium
 
-                // --- Brand Section ---
-                Item {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: brandRow.implicitWidth + Theme.spacingSmall * 2
-                    height: 28
-
-                    Rectangle {
-                        id: brandPill
-                        anchors.fill: parent
-                        radius: Theme.radiusPill
-                        color: brandMouse.containsMouse ? Theme.surfaceHover : "transparent"
-                        border.color: brandMouse.containsMouse ? Theme.borderHighlight : "transparent"
-                        border.width: 1
-                        scale: brandMouse.pressed ? 0.94 : 1.0
-
-                        Behavior on color {
-                            ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                        }
-                        Behavior on border.color {
-                            ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                        }
-                        Behavior on scale {
-                            NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                        }
-
-                        Row {
-                            id: brandRow
-                            anchors.centerIn: parent
-                            spacing: Theme.spacingSmall + 2
-
-                            // Geometric Accent Diamond Mark
-                            Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 8
-                                height: 8
-                                radius: 2
-                                rotation: 45
-                                color: Theme.accent
-                                scale: brandMouse.containsMouse ? 1.15 : 1.0
-
-                                Behavior on color {
-                                    ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                                }
-                                Behavior on scale {
-                                    NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                                }
-                            }
-
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "RICE"
-                                font.family: Theme.fontMono
-                                font.pixelSize: 12
-                                font.bold: true
-                                font.letterSpacing: 2.0
-                                color: Theme.textPrimary
-                            }
-                        }
-
-                        MouseArea {
-                            id: brandMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                        }
-                    }
-                }
-
-                // Vertical hairline separator
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 1
-                    height: 14
-                    color: Theme.borderSubtle
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                }
-
-                // --- Workspace Indicators ---
+                // -------------------------------------------------------------
+                // SECTION 1: Brand Identity Glyph & Title
+                // -------------------------------------------------------------
                 Row {
-                    id: wsRow
+                    id: brandGroup
+                    spacing: 7
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 4
 
-                    Repeater {
-                        model: [1, 2, 3, 4]
+                    Item {
+                        width: 10
+                        height: 10
+                        anchors.verticalCenter: parent.verticalCenter
 
                         Rectangle {
+                            anchors.fill: parent
+                            radius: 5
+                            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.20)
+                        }
+
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            anchors.centerIn: parent
+                            color: Theme.accent
+                        }
+                    }
+
+                    Text {
+                        text: "RICE"
+                        font.family: Theme.fontUi
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 1.5
+                        color: Theme.textSecondary
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                // Vertical Hairline Separator
+                Rectangle {
+                    width: 1
+                    height: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.borderSubtle
+                }
+
+                // -------------------------------------------------------------
+                // SECTION 2: Interactive Hyprland Workspace Selector
+                // -------------------------------------------------------------
+                Row {
+                    id: wsRow
+                    spacing: 4
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Repeater {
+                        model: [1, 2, 3, 4, 5]
+
+                        Item {
                             id: wsPill
-                            readonly property bool isCurrent: modelData === root.activeWorkspace
-
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: isCurrent ? 30 : 24
+                            width: 24
                             height: 24
-                            radius: Theme.radiusPill
+                            anchors.verticalCenter: parent.verticalCenter
 
-                            color: isCurrent
-                                ? Theme.accent
-                                : (wsMouse.containsMouse ? Theme.surfaceHover : "transparent")
+                            readonly property int wsId: modelData
+                            readonly property bool isActive: root.activeWorkspace === wsPill.wsId
+                            readonly property bool isHovered: wsMouse.containsMouse
 
-                            border.color: isCurrent
-                                ? "transparent"
-                                : (wsMouse.containsMouse ? Theme.borderHighlight : Theme.borderSubtle)
-                            border.width: isCurrent ? 0 : 1
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 12
+                                color: wsPill.isActive ? Theme.accent : (wsPill.isHovered ? Theme.surfaceHover : "transparent")
 
-                            scale: wsMouse.pressed ? 0.90 : 1.0
+                                Behavior on color {
+                                    ColorAnimation {
+                                        duration: Theme.animDuration
+                                        easing.type: Easing.OutQuad
+                                    }
+                                }
 
-                            Behavior on color {
-                                ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                            }
-                            Behavior on border.color {
-                                ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                            }
-                            Behavior on width {
-                                NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                            }
-                            Behavior on scale {
-                                NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                            }
+                                scale: wsMouse.pressed ? 0.94 : (wsPill.isHovered ? 1.06 : 1.0)
+                                Behavior on scale {
+                                    NumberAnimation {
+                                        duration: Theme.animDuration
+                                        easing.type: Easing.OutQuad
+                                    }
+                                }
 
-                            Text {
-                                anchors.centerIn: parent
-                                text: modelData.toString()
-                                font.family: Theme.fontMono
-                                font.pixelSize: 11
-                                font.bold: wsPill.isCurrent
-                                color: wsPill.isCurrent
-                                    ? Theme.onAccent
-                                    : (wsMouse.containsMouse ? Theme.textPrimary : Theme.textMuted)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: wsPill.wsId
+                                    font.family: Theme.fontMono
+                                    font.pixelSize: 11
+                                    font.weight: wsPill.isActive ? Font.Bold : Font.Normal
+                                    color: wsPill.isActive ? Theme.onAccent : (wsPill.isHovered ? Theme.textPrimary : Theme.textMuted)
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: Theme.animDuration
+                                            easing.type: Easing.OutQuad
+                                        }
+                                    }
+                                }
                             }
 
                             MouseArea {
@@ -479,269 +511,200 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: root.activeWorkspace = modelData
+                                acceptedButtons: Qt.LeftButton
+                                onClicked: {
+                                    root.switchWorkspace(wsPill.wsId);
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
-    }
 
-    // =========================================================================
-    // RIGHT REGION: Floating Glass System Status Island
-    // =========================================================================
-    Item {
-        id: rightRegion
-        anchors.right: parent.right
-        anchors.rightMargin: Theme.spacingLarge
-        anchors.left: centerRegion.right
-        anchors.leftMargin: Theme.spacingMedium
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-
-        SurfaceCard {
-            id: statusCard
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            height: 36
-            width: statusRow.implicitWidth + Theme.spacingMedium * 2
-            radius: Theme.radiusPill
-            hoverEnabled: false
-            contentPadding: 0
-
-            opacity: root.rightVisible ? 1.0 : 0.0
-            transform: Translate {
-                y: root.rightVisible ? 0 : -44
-                Behavior on y {
-                    NumberAnimation {
-                        duration: Theme.animDuration
-                        easing.type: Easing.OutCubic
-                    }
-                }
-            }
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: Theme.animDuration
-                    easing.type: Easing.OutCubic
-                }
-            }
-
-            Row {
-                id: statusRow
-                anchors.centerIn: parent
-                spacing: Theme.spacingSmall
-
-                // --- Network Cell ---
+                // Vertical Hairline Separator
                 Rectangle {
-                    id: netCell
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: netRow.implicitWidth + Theme.spacingSmall * 2
-                    height: 26
-                    radius: Theme.radiusPill
-                    color: netMouse.containsMouse ? Theme.surfaceHover : "transparent"
-                    border.color: netMouse.containsMouse ? Theme.borderHighlight : "transparent"
-                    border.width: 1
-                    scale: netMouse.pressed ? 0.94 : 1.0
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                    Behavior on border.color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                    Behavior on scale {
-                        NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-
-                    Row {
-                        id: netRow
-                        anchors.centerIn: parent
-                        spacing: 5
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "󰤨"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 13
-                            color: Theme.accent
-                        }
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "NET"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 10
-                            font.bold: true
-                            font.letterSpacing: 0.5
-                            color: Theme.textMuted
-                        }
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "100%"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 11
-                            font.bold: true
-                            color: Theme.textPrimary
-                        }
-                    }
-
-                    MouseArea {
-                        id: netMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                    }
-                }
-
-                // Vertical hairline separator
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
                     width: 1
                     height: 12
+                    anchors.verticalCenter: parent.verticalCenter
                     color: Theme.borderSubtle
+                }
 
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
+                // -------------------------------------------------------------
+                // SECTION 3: Refined Date & Clock Treatment
+                // -------------------------------------------------------------
+                Row {
+                    id: clockGroup
+                    spacing: 8
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Text {
+                        text: root.currentDateText
+                        font.family: Theme.fontUi
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                        font.letterSpacing: 0.5
+                        font.capitalization: Font.AllUppercase
+                        color: Theme.textSecondary
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: "•"
+                        font.pixelSize: 9
+                        color: Theme.textMuted
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: root.currentTimeText + " " + root.currentAmPmText
+                        font.family: Theme.fontMono
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: Theme.textPrimary
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                 }
 
-                // --- Volume Cell ---
+                // Vertical Hairline Separator
                 Rectangle {
-                    id: volCell
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: volRow.implicitWidth + Theme.spacingSmall * 2
-                    height: 26
-                    radius: Theme.radiusPill
-                    color: volMouse.containsMouse ? Theme.surfaceHover : "transparent"
-                    border.color: volMouse.containsMouse ? Theme.borderHighlight : "transparent"
-                    border.width: 1
-                    scale: volMouse.pressed ? 0.94 : 1.0
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                    Behavior on border.color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                    Behavior on scale {
-                        NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-
-                    Row {
-                        id: volRow
-                        anchors.centerIn: parent
-                        spacing: 5
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "󰕾"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 13
-                            color: Theme.accent
-                        }
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "VOL"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 10
-                            font.bold: true
-                            font.letterSpacing: 0.5
-                            color: Theme.textMuted
-                        }
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "80%"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 11
-                            font.bold: true
-                            color: Theme.textPrimary
-                        }
-                    }
-
-                    MouseArea {
-                        id: volMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                    }
-                }
-
-                // Vertical hairline separator
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
                     width: 1
                     height: 12
+                    anchors.verticalCenter: parent.verticalCenter
                     color: Theme.borderSubtle
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
                 }
 
-                // --- Battery Cell ---
-                Rectangle {
-                    id: batCell
+                // -------------------------------------------------------------
+                // SECTION 4: Truthful System Status Indicators
+                // Clean iconography with hover feedback and no fake percentages
+                // -------------------------------------------------------------
+                Row {
+                    id: statusGroup
+                    spacing: 4
                     anchors.verticalCenter: parent.verticalCenter
-                    width: batRow.implicitWidth + Theme.spacingSmall * 2
-                    height: 26
-                    radius: Theme.radiusPill
-                    color: batMouse.containsMouse ? Theme.surfaceHover : "transparent"
-                    border.color: batMouse.containsMouse ? Theme.borderHighlight : "transparent"
-                    border.width: 1
-                    scale: batMouse.pressed ? 0.94 : 1.0
 
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                    Behavior on border.color {
-                        ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
-                    Behavior on scale {
-                        NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
-                    }
+                    // Network Status Icon
+                    Item {
+                        width: 24
+                        height: 24
+                        anchors.verticalCenter: parent.verticalCenter
 
-                    Row {
-                        id: batRow
-                        anchors.centerIn: parent
-                        spacing: 5
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 12
+                            color: netMouse.containsMouse ? Theme.surfaceHover : "transparent"
+                            scale: netMouse.pressed ? 0.94 : (netMouse.containsMouse ? 1.05 : 1.0)
 
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "󰁹"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 13
-                            color: Theme.accent
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: Theme.animDuration
+                                    easing.type: Easing.OutQuad
+                                }
+                            }
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: Theme.animDuration
+                                    easing.type: Easing.OutQuad
+                                }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "󰖩"
+                                font.family: Theme.fontMono
+                                font.pixelSize: 12
+                                color: netMouse.containsMouse ? Theme.accent : Theme.textSecondary
+                            }
                         }
 
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "BAT"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 10
-                            font.bold: true
-                            font.letterSpacing: 0.5
-                            color: Theme.textMuted
-                        }
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "95%"
-                            font.family: Theme.fontMono
-                            font.pixelSize: 11
-                            font.bold: true
-                            color: Theme.textPrimary
+                        MouseArea {
+                            id: netMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
                         }
                     }
 
-                    MouseArea {
-                        id: batMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
+                    // Volume Status Icon
+                    Item {
+                        width: 24
+                        height: 24
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 12
+                            color: volMouse.containsMouse ? Theme.surfaceHover : "transparent"
+                            scale: volMouse.pressed ? 0.94 : (volMouse.containsMouse ? 1.05 : 1.0)
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: Theme.animDuration
+                                    easing.type: Easing.OutQuad
+                                }
+                            }
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: Theme.animDuration
+                                    easing.type: Easing.OutQuad
+                                }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "󰕾"
+                                font.family: Theme.fontMono
+                                font.pixelSize: 12
+                                color: volMouse.containsMouse ? Theme.accent : Theme.textSecondary
+                            }
+                        }
+
+                        MouseArea {
+                            id: volMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                        }
+                    }
+
+                    // Battery / Power Status Icon
+                    Item {
+                        width: 24
+                        height: 24
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 12
+                            color: batMouse.containsMouse ? Theme.surfaceHover : "transparent"
+                            scale: batMouse.pressed ? 0.94 : (batMouse.containsMouse ? 1.05 : 1.0)
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: Theme.animDuration
+                                    easing.type: Easing.OutQuad
+                                }
+                            }
+                            Behavior on scale {
+                                NumberAnimation {
+                                    duration: Theme.animDuration
+                                    easing.type: Easing.OutQuad
+                                }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "󰁹"
+                                font.family: Theme.fontMono
+                                font.pixelSize: 12
+                                color: batMouse.containsMouse ? Theme.accent : Theme.textSecondary
+                            }
+                        }
+
+                        MouseArea {
+                            id: batMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                        }
                     }
                 }
             }

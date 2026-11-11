@@ -12,6 +12,8 @@ Singleton {
 
     // Core dimensional & spacing tokens
     readonly property int panelHeight: 40
+    readonly property int railHeight: 38
+    readonly property int railRadius: 19
     readonly property int bodyFontSize: 16
     readonly property int spacingSmall: 4
     readonly property int spacingMedium: 8
@@ -19,6 +21,17 @@ Singleton {
     readonly property int radiusSmall: 4
     readonly property int radiusMedium: 8
     readonly property int radiusPill: 18
+
+    // Rail interaction & animation tokens (Milestone 2.1.7 Choreography)
+    readonly property int autoHideDelayMs: 2500
+    readonly property int revealDuration: reducedMotion ? 0 : 340
+    readonly property int retractDuration: reducedMotion ? 0 : 250
+    readonly property real hiddenYOffset: -26.0
+    readonly property real hiddenScale: 0.985
+
+    // Backward-compatibility animation aliases
+    readonly property int revealAnimDuration: revealDuration
+    readonly property int retractAnimDuration: retractDuration
 
     // Typography tokens
     readonly property string fontMono: "JetBrainsMono Nerd Font"
@@ -50,6 +63,11 @@ Singleton {
 
     // Base translucent surface (for panels, floating cards, bars)
     readonly property color baseSurface: Qt.rgba(bgCanvas.r, bgCanvas.g, bgCanvas.b, 0.75)
+
+    // Cohesive rail material tokens
+    readonly property color railBg: Qt.rgba(bgCanvas.r * 0.35, bgCanvas.g * 0.35, bgCanvas.b * 0.35, 0.94)
+    readonly property color railBorder: Qt.rgba(textPrimary.r, textPrimary.g, textPrimary.b, 0.14)
+    readonly property color railHighlight: Qt.rgba(1.0, 1.0, 1.0, 0.07)
 
     // Dynamic borders & interaction states
     readonly property color borderSubtle: Qt.rgba(textPrimary.r, textPrimary.g, textPrimary.b, 0.12)
