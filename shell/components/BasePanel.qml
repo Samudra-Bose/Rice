@@ -19,6 +19,6 @@ PanelWindow {
         bottom: false
     }
 
-    implicitHeight: Theme.panelHeight
-    color: Theme.backgroundColor
+    implicitHeight: Theme.panelHeight + Theme.spacingMedium
+    color: "transparent"
 }
