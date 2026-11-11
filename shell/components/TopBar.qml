@@ -7,6 +7,41 @@ Item {
 
     implicitHeight: Theme.panelHeight + Theme.spacingMedium
 
+    // Read-only visual island references for surgical Wayland input masking
+    readonly property Item leftIsland: navCard
+    readonly property Item centerIsland: clockCard
+    readonly property Item rightIsland: statusCard
+
+    // Active workspace state (interactive)
+    property int activeWorkspace: 1
+
+    // Real-time clock and date properties
+    property string currentDateText: "WED, OCT 14"
+    property string currentTimeText: "12:00"
+    property string currentAmPmText: "PM"
+
+    Timer {
+        id: clockTimer
+        interval: 1000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            const now = new Date();
+            const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+            const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+            root.currentDateText = days[now.getDay()] + ", " + months[now.getMonth()] + " " + now.getDate();
+
+            let hours = now.getHours();
+            root.currentAmPmText = hours >= 12 ? "PM" : "AM";
+            hours = hours % 12;
+            hours = hours ? hours : 12;
+            const minutes = ("0" + now.getMinutes()).slice(-2);
+            root.currentTimeText = hours + ":" + minutes;
+        }
+    }
+
     // =========================================================================
     // CENTER REGION: Mathematically Centered Floating Glass Clock Capsule
     // =========================================================================
@@ -33,7 +68,7 @@ Item {
                 // Refined date label
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "WED, OCT 14"
+                    text: root.currentDateText
                     font.family: Theme.fontMono
                     font.pixelSize: 11
                     font.bold: true
@@ -62,7 +97,7 @@ Item {
                     Text {
                         id: clockLabel
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "12:00"
+                        text: root.currentTimeText
                         font.family: Theme.fontMono
                         font.pixelSize: 14
                         font.bold: true
@@ -72,7 +107,7 @@ Item {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.verticalCenterOffset: 1
-                        text: "PM"
+                        text: root.currentAmPmText
                         font.family: Theme.fontMono
                         font.pixelSize: 10
                         font.bold: true
@@ -123,12 +158,16 @@ Item {
                         color: brandMouse.containsMouse ? Theme.surfaceHover : "transparent"
                         border.color: brandMouse.containsMouse ? Theme.borderHighlight : "transparent"
                         border.width: 1
+                        scale: brandMouse.pressed ? 0.94 : 1.0
 
                         Behavior on color {
                             ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                         }
                         Behavior on border.color {
                             ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
+                        }
+                        Behavior on scale {
+                            NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                         }
 
                         Row {
@@ -144,9 +183,13 @@ Item {
                                 radius: 2
                                 rotation: 45
                                 color: Theme.accent
+                                scale: brandMouse.containsMouse ? 1.15 : 1.0
 
                                 Behavior on color {
                                     ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
+                                }
+                                Behavior on scale {
+                                    NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                                 }
                             }
 
@@ -189,28 +232,25 @@ Item {
                     spacing: 4
 
                     Repeater {
-                        model: [
-                            { name: "1", active: true },
-                            { name: "2", active: false },
-                            { name: "3", active: false },
-                            { name: "4", active: false }
-                        ]
+                        model: [1, 2, 3, 4]
 
                         Rectangle {
                             id: wsPill
+                            readonly property bool isCurrent: modelData === root.activeWorkspace
+
                             anchors.verticalCenter: parent.verticalCenter
-                            width: modelData.active ? 30 : 24
+                            width: isCurrent ? 30 : 24
                             height: 24
                             radius: Theme.radiusPill
 
-                            color: modelData.active
+                            color: isCurrent
                                 ? Theme.accent
                                 : (wsMouse.containsMouse ? Theme.surfaceHover : "transparent")
 
-                            border.color: modelData.active
+                            border.color: isCurrent
                                 ? "transparent"
                                 : (wsMouse.containsMouse ? Theme.borderHighlight : Theme.borderSubtle)
-                            border.width: modelData.active ? 0 : 1
+                            border.width: isCurrent ? 0 : 1
 
                             scale: wsMouse.pressed ? 0.90 : 1.0
 
@@ -229,11 +269,11 @@ Item {
 
                             Text {
                                 anchors.centerIn: parent
-                                text: modelData.name
+                                text: modelData.toString()
                                 font.family: Theme.fontMono
                                 font.pixelSize: 11
-                                font.bold: modelData.active
-                                color: modelData.active
+                                font.bold: wsPill.isCurrent
+                                color: wsPill.isCurrent
                                     ? Theme.onAccent
                                     : (wsMouse.containsMouse ? Theme.textPrimary : Theme.textMuted)
                             }
@@ -243,6 +283,7 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
+                                onClicked: root.activeWorkspace = modelData
                             }
                         }
                     }
@@ -288,12 +329,16 @@ Item {
                     color: netMouse.containsMouse ? Theme.surfaceHover : "transparent"
                     border.color: netMouse.containsMouse ? Theme.borderHighlight : "transparent"
                     border.width: 1
+                    scale: netMouse.pressed ? 0.94 : 1.0
 
                     Behavior on color {
                         ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                     }
                     Behavior on border.color {
                         ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                     }
 
                     Row {
@@ -359,12 +404,16 @@ Item {
                     color: volMouse.containsMouse ? Theme.surfaceHover : "transparent"
                     border.color: volMouse.containsMouse ? Theme.borderHighlight : "transparent"
                     border.width: 1
+                    scale: volMouse.pressed ? 0.94 : 1.0
 
                     Behavior on color {
                         ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                     }
                     Behavior on border.color {
                         ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                     }
 
                     Row {
@@ -430,12 +479,16 @@ Item {
                     color: batMouse.containsMouse ? Theme.surfaceHover : "transparent"
                     border.color: batMouse.containsMouse ? Theme.borderHighlight : "transparent"
                     border.width: 1
+                    scale: batMouse.pressed ? 0.94 : 1.0
 
                     Behavior on color {
                         ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                     }
                     Behavior on border.color {
                         ColorAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
+                    }
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.animDuration; easing.type: Easing.OutQuad }
                     }
 
                     Row {

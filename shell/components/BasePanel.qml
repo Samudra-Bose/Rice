@@ -12,6 +12,9 @@ PanelWindow {
     WlrLayershell.namespace: root.panelNamespace
     WlrLayershell.layer: WlrLayer.Top
 
+    // Zero workspace reservation: normal windows occupy full work area
+    exclusiveZone: 0
+
     anchors {
         top: true
         left: true
